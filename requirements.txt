@@ -1,0 +1,17 @@
+# ── Task Management API — Dependencies ──────────────────────────────────
+# Install with:  pip install -r requirements.txt
+#
+# Core Framework
+fastapi==0.136.1
+uvicorn[standard]==0.47.0
+
+# Database (async PostgreSQL via SQLAlchemy)
+sqlalchemy[asyncio]==2.0.49
+asyncpg==0.31.0
+
+# Redis
+redis==7.4.0
+
+# Configuration & Validation
+pydantic-settings==2.14.1
+pydantic[email]==2.13.4

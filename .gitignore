@@ -1,0 +1,12 @@
+.env
+__pycache__/
+*.pyc
+.pytest_cache/
+test.db
+*.zip
+
+# never commit deploy keys
+deploy_key
+deploy_key.pub
+*.pem
+

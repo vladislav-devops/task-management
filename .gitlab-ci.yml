@@ -1,0 +1,85 @@
+# Made by Vladislav Levchenko
+
+stages:
+  - test
+  - build
+  - deploy
+
+variables:
+  IMAGE_TAG: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+  IMAGE_LATEST: $CI_REGISTRY_IMAGE:latest
+
+.runner_tags:
+  tags: [self-hosted]
+
+.main_only:
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+
+test:
+  extends: .runner_tags
+  stage: test
+  image: python:3.11-slim
+  before_script:
+    - pip install --no-cache-dir -r requirements-dev.txt
+  script:
+    - pytest -v
+
+build:
+  extends:
+    - .runner_tags
+    - .main_only
+  stage: build
+  image: quay.io/buildah/stable:latest
+  variables:
+    STORAGE_DRIVER: vfs
+    BUILDAH_ISOLATION: chroot
+    BUILDAH_FORMAT: docker
+  before_script:
+    - buildah login --tls-verify=false -u "$CI_REGISTRY_USER" -p "$CI_REGISTRY_PASSWORD" "$CI_REGISTRY"
+  script:
+    - buildah bud --isolation=chroot --layers --ulimit nofile=4096:4096 -t "$IMAGE_TAG" -t "$IMAGE_LATEST" .
+    - buildah push --tls-verify=false "$IMAGE_TAG"
+    - buildah push --tls-verify=false "$IMAGE_LATEST"
+
+deploy:
+  extends:
+    - .runner_tags
+    - .main_only
+  stage: deploy
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache openssh-client rsync
+    - mkdir -p ~/.ssh && chmod 700 ~/.ssh
+    # base64 sidesteps GitLab File-type variable newline mangling
+    - echo "$DEPLOY_SSH_KEY_B64" | base64 -d > ~/.ssh/id_rsa
+    - chmod 600 ~/.ssh/id_rsa
+    - ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+  script:
+    - ssh $DEPLOY_USER@$DEPLOY_HOST "mkdir -p /opt/junior-task"
+    - echo "$APP_ENV_B64" | base64 -d > .env.deploy
+    - rsync -avz .env.deploy $DEPLOY_USER@$DEPLOY_HOST:/opt/junior-task/.env
+    - rm .env.deploy
+    - rsync -avz docker-compose.yml $DEPLOY_USER@$DEPLOY_HOST:/opt/junior-task/
+    - rsync -avz alloy/ $DEPLOY_USER@$DEPLOY_HOST:/opt/junior-task/alloy/
+    - rsync -avz grafana/ $DEPLOY_USER@$DEPLOY_HOST:/opt/junior-task/grafana/
+    - rsync -avz loki/ $DEPLOY_USER@$DEPLOY_HOST:/opt/junior-task/loki/
+    - |
+      AUTH_B64=$(echo -n "${CI_REGISTRY_USER}:${CI_REGISTRY_PASSWORD}" | base64 -w 0)
+      ssh $DEPLOY_USER@$DEPLOY_HOST "
+        set -e
+        cd /opt/junior-task
+        mkdir -p ~/.docker
+        echo '{\"auths\":{\"$CI_REGISTRY\":{\"auth\":\"$AUTH_B64\"}}}' > ~/.docker/config.json
+        chmod 600 ~/.docker/config.json
+        grep -q '^IMAGE_TAG=' .env && sed -i 's|^IMAGE_TAG=.*|IMAGE_TAG=$IMAGE_TAG|' .env || echo 'IMAGE_TAG=$IMAGE_TAG' >> .env
+        docker compose pull
+        docker compose up -d --force-recreate --remove-orphans
+        for i in \$(seq 1 30); do
+          docker compose ps app | grep -q '(healthy)' && exit 0
+          sleep 2
+        done
+        echo 'app did not become healthy in 60s'
+        docker compose logs app --tail=50
+        exit 1
+      "

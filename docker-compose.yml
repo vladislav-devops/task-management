@@ -1,0 +1,117 @@
+# the docker-compose that made by me (Vladislav Levchenko)
+# there are app, postgres, redis, loki/alloy/grafana for logs
+
+# making anchors
+x-restart: &restart
+  restart: unless-stopped
+
+x-hc: &hc
+  interval: 5s
+  timeout: 3s
+  retries: 5
+
+x-labels: &labels
+  author: "Vladislav Levchenko"
+  project: "junior-task"
+
+x-depends-loki: &depends-loki
+  depends_on:
+    - loki
+
+services:
+  # the FastAPI app
+  app:
+    build: .
+    image: ${IMAGE_TAG:?IMAGE_TAG must be set}
+    ports:
+      - "${APP_PORT:-8000}:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      <<: *hc
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+    labels:
+      <<: *labels
+      tier: "app"
+    <<: *restart
+
+  # postgres
+  db:
+    image: postgres:16-alpine3.23
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      <<: *hc
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+    labels:
+      <<: *labels
+      tier: "database"
+    <<: *restart
+
+  # redis cache
+  redis:
+    image: redis:8-alpine3.23
+    healthcheck:
+      <<: *hc
+      test: ["CMD", "redis-cli", "ping"]
+    labels:
+      <<: *labels
+      tier: "cache"
+    <<: *restart
+
+  # logs storage
+  loki:
+    image: grafana/loki:3.7.2
+    volumes:
+      - loki_data:/loki
+      - ./loki/loki-config.yaml:/etc/loki/local-config.yaml:ro
+    command: -config.file=/etc/loki/local-config.yaml
+    labels:
+      <<: *labels
+      tier: "observability"
+    <<: *restart
+  
+  # log collector for Loki
+  alloy:
+    image: grafana/alloy:v1.16.1
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: run --server.http.listen-addr=0.0.0.0:12345 /etc/alloy/config.alloy
+    labels:
+      <<: *labels
+      tier: "observability"
+    <<: [*depends-loki, *restart]
+
+  # UI for the logs
+  grafana:
+    image: grafana/grafana:11.4.0
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:? GRAFANA_ADMIN_PASSWORD must be set}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    labels:
+      <<: *labels
+      tier: "observability"
+    <<: [*depends-loki, *restart]
+
+volumes:
+  pg_data:
+  loki_data:
+  grafana_data:
