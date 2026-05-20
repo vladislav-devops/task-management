@@ -54,7 +54,7 @@ http://localhost:8000/redoc
 
 ```bash
 git clone https://github.com/vladislav-devops/task-management.git
-cd task_management
+cd task-management
 ```
 
 2. Скопировать пример переменных окружения:
