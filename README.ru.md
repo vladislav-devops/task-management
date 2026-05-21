@@ -2,7 +2,7 @@
   <img src="assets/banner.png" alt="Task Management API" width="800">
 </p>
 
-![Repo size](https://img.shields.io/badge/repo%20size-748%20KB-d67429)
+![Repo size](https://img.shields.io/github/repo-size/vladislav-devops/task-management?color=d67429)
 ![Last commit](https://img.shields.io/github/last-commit/vladislav-devops/task-management?color=d67429)
 ![Stars](https://img.shields.io/github/stars/vladislav-devops/task-management?style=flat&color=d67429)
 
@@ -162,6 +162,7 @@ chmod 600 ~/.ssh/authorized_keys
 base64 -w 0 < .env
 ```
 Скопируй весь вывод.
+
 3. Открой GitLab в браузере.
 4. В левом меню → **Settings** → **CI/CD**.
 5. Раскрой секцию **Variables**.
